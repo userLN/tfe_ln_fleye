@@ -121,6 +121,7 @@ int main(int argc, char **argv)
 			cout << contour[0] << endl;
 			int thickness = max(abs(contour[0].at(0).x -contour[0].at(1).x),abs(contour[0].at(0).y - contour[0].at(2).y))+10;
 			drawContours(mask,contour,-1,Scalar::all(0),thickness);
+			
 		}
 	
 			
@@ -147,17 +148,13 @@ int main(int argc, char **argv)
 		
 		// Retrive information about the center and the corners of the markers
 			
-		
-		for(int frame = 2; frame <= frameCount; frame++ )
-		{
-			frameNumber << "frame" << frame;
-			markersCenter [frameNumber.str()] >> centersMatrix;
-			markersCorners [frameNumber.str()] >> cornersMatrix;
-			frameNumber.str("");
-		}
+		frameNumber << "frame" << frame;
+		markersCenter [frameNumber.str()] >> centersMatrix;
+		markersCorners [frameNumber.str()] >> cornersMatrix;
+		frameNumber.str("");
 		
 		
-		// Create the mask to avoid taking feature in the markers
+		// Create the mask to avoid taking features in the markers
 		for(int i=0; i<10; ++i)
 			if(!(cornersMatrix.at<float>(0,i)<0 || cornersMatrix.at<float>(1,i)<0))
 			{
@@ -166,11 +163,12 @@ int main(int argc, char **argv)
 				contour.push_back(vector<Point>());
 				for(int j=0; j<4 ; j++)
 					{
-						contour[0].push_back((Point2f) (cornersMatrix.at<float>((2*j),i),cornersMatrix.at<float>((2*j)+1,i)));
+						contour[0].push_back(Point (cornersMatrix.at<float>((2*j),i),cornersMatrix.at<float>((2*j)+1,i)));
 					}
-				
 				int thickness = max(abs(contour[0].at(0).x -contour[0].at(1).x),abs(contour[0].at(0).y - contour[0].at(2).y))+10;
 				drawContours(mask,contour,-1,Scalar::all(0),thickness);
+				//drawContours(frame2,contour,-1,Scalar(0,200,0),thickness);
+				
 			}
 		
 		// Detecting keypoints
@@ -218,7 +216,7 @@ int main(int argc, char **argv)
 			imwrite(filename, frame_flow_out);
 		}
 	}
-    
+	markersCenter.release();
+	markersCorners.release();
     return 0;
 }
-
