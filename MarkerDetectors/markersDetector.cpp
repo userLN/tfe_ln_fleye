@@ -40,18 +40,17 @@ int main(int argc, char **argv)
 	string filename;
 	stringstream ss;
 	
+	int frameCount = 0;
+	stringstream frameNumber;
 	
-	// Files creation that saves the markers positions over time
-	ofstream output1, output2;
-	output1.open("markers_position.txt");
-	output2.open("markers_corners.txt");
-	for(int i=10; i<101; i+=10)
-	{
-		output1<<i <<"\t";
-		output2<<i <<"\t";
-	}
-	output1<<"\n";
-	output2<<"\n";
+	
+	// Files creation that saves the markers positions over time	
+	FileStorage markers_centers("markers_centers.yml", FileStorage::WRITE);
+	FileStorage markers_corners("markers_corners.yml", FileStorage::WRITE);
+	Mat ids = (Mat_<int> (1,10) <<10,20,30,40,50,60,70,80,90,100);
+	
+	markers_centers << "ids" << ids;
+	markers_corners << "ids" << ids;
 	
 	// Markerdetector initialization
 	MarkerDetector MDetector;
@@ -72,48 +71,40 @@ int main(int argc, char **argv)
 		MDetector.detect(frame,Markers);
 		sort(Markers.begin(),Markers.end(),sort_markers);
 		
+		Mat centersMatrix(2,10,CV_32F, Scalar::all(-1.));
+		Mat cornersMatrix(8,10,CV_32F, Scalar::all(-1.));
+		
+		int k =0;
+		for(int j=0; j<10; ++j)
+			if(k<Markers.size() && Markers[k].id==(j+1)*10)
+			{
+				centersMatrix.at<float>(0,j)=Markers[k].getCenter().x;
+				centersMatrix.at<float>(1,j)=Markers[k].getCenter().y;
+				k++;
+			}
+			
+		for(int i=0;i<4;i++)
+		{
+			int k=0;
+			for(int j=0; j<10; ++j)
+			if(k<Markers.size() && Markers[k].id==(j+1)*10)
+			{
+				cornersMatrix.at<float>(0+(2*i),j)=Markers[k].at(i).x;
+				cornersMatrix.at<float>(1+(2*i),j)=Markers[k].at(i).y;
+				k++;
+			}
+		}
+
+		
 		// Draw markers
 		for(int i =0;i<Markers.size();i++)
 			Markers[i].draw(frame,Scalar(0,0,225),8);
 		
-		// Write central position of the markers in "markers_position.txt"
-		int k=0;
-		for(int j=10; j<101; j+=10)
-		{
-			if(k<Markers.size() && Markers[k].id==j)
-				output1<< Markers[k++].getCenter() <<"\t";
-			
-			else if (Markers[k].id % 10 != 0)
-			{
-				output1<<"\t";
-				k++;
-			}
-			
-			else
-				output1<<"\t";
-		}
-		output1 << "\n";
-		
-		
-		// Write corners position of the markers in "markers_corners.txt"
-		for(int l=0;l<4;l++)
-		{
-			int k=0;
-			for(int j=10; j<101; j+=10)
-			{
-				if(k<Markers.size() && Markers[k].id==j)
-					output2<< Markers[k++].at(l) <<"\t";
-
-				else if (Markers[k].id % 10 != 0)
-				{
-					output2<<"\t";
-					k++;
-				}
-				else
-					output2<<"\t";
-			}
-			output2 << "\n";
-		}
+		// Save position od the centers and the corners
+		frameNumber << "frame" << ++frameCount;
+		markers_centers << frameNumber.str() << centersMatrix;
+		markers_corners << frameNumber.str() << cornersMatrix;
+		frameNumber.str("");
 		
 		//Show treshholded image
 		namedWindow("Thresholded Image",0);
@@ -142,6 +133,12 @@ int main(int argc, char **argv)
 			imwrite(filename, frame);
 		}
 	}
-	output1.close();
+	
+	markers_centers << "frameCount" << frameCount;
+	markers_corners << "frameCount" << frameCount;
+	
+	markers_centers.release();
+	markers_corners.release();
+	
 	return 0;
 }
