@@ -5,23 +5,37 @@
 
 // OpenCV libraries
 #include "opencv2/opencv.hpp"
+#include "opencv2/highgui/highgui.hpp"
 
 // ArUco libraries
 #include "aruco/aruco.h"
 #include "aruco/cvdrawingutils.h"
+
+// Others
+#include "OutputControl.h"
 
 // Namespaces
 using namespace cv;
 using namespace std;
 using namespace aruco;
 
+// Global Variables
+float const THRESHOLD_X = 6.;
+float const THRESHOLD_Y = 6.;
 
-// Function that sorts the markers according to their id
-bool sort_markers(const Marker &a, const Marker &b)
-{
+///////////////////////////////////////////////////////////////
+// Function that sorts the markers according to their id	//
+/////////////////////////////////////////////////////////////
+
+bool sort_markers(const Marker &a, const Marker &b) 
+{ 
 	return ((a.id < b.id));
 }
 
+
+///////////////////////
+// Main function	//
+/////////////////////
 
 int main(int argc, char **argv) 
 {
@@ -33,28 +47,25 @@ int main(int argc, char **argv)
 		cerr << "Failed to open the video file" << endl;
 		return -1;
 	}
-	double fps = 25;
-	int o=0;
-	
-	// Filename initialization for the screenshot option
-	string filename;
-	stringstream ss;
-	
+	double fps = capture.get(CV_CAP_PROP_FPS);
+	if (fps!=fps)
+		fps=60;
+
 	int frameCount = 0;
 	stringstream frameNumber;
+	OutputControl option;
 	
-	
-	// Files creation that saves the markers positions over time	
 	FileStorage markers_centers("markers_centers.yml", FileStorage::WRITE);
 	FileStorage markers_corners("markers_corners.yml", FileStorage::WRITE);
-	Mat ids = (Mat_<int> (1,10) <<10,20,30,40,50,60,70,80,90,100);
 	
+	// The first line of the file contains the markers ids
+	Mat ids = (Mat_<int> (1,10) <<10,20,30,40,50,60,70,80,90,100);
 	markers_centers << "ids" << ids;
 	markers_corners << "ids" << ids;
 	
 	// Markerdetector initialization
 	MarkerDetector MDetector;
-	MDetector.setThresholdParams(6.,6.);
+	MDetector.setThresholdParams(THRESHOLD_X,THRESHOLD_Y);
 	vector<Marker> Markers;
 	
 	Mat frame;
@@ -74,6 +85,7 @@ int main(int argc, char **argv)
 		Mat centersMatrix(2,10,CV_32F, Scalar::all(-1.));
 		Mat cornersMatrix(8,10,CV_32F, Scalar::all(-1.));
 		
+		// Put the centers in a matrix
 		int k =0;
 		for(int j=0; j<10; ++j)
 			if(k<Markers.size() && Markers[k].id==(j+1)*10)
@@ -83,6 +95,7 @@ int main(int argc, char **argv)
 				k++;
 			}
 			
+		// Put the corners in a matrix	
 		for(int i=0;i<4;i++)
 		{
 			int k=0;
@@ -95,12 +108,11 @@ int main(int argc, char **argv)
 			}
 		}
 
-		
 		// Draw markers
 		for(int i =0;i<Markers.size();i++)
 			Markers[i].draw(frame,Scalar(0,0,225),8);
 		
-		// Save position od the centers and the corners
+		// Write the center and the corners information in the file
 		frameNumber << "frame" << ++frameCount;
 		markers_centers << frameNumber.str() << centersMatrix;
 		markers_corners << frameNumber.str() << cornersMatrix;
@@ -117,23 +129,15 @@ int main(int argc, char **argv)
 		imshow("Marked Image",frame);
 		
 		
-		// Keeps the realtime speed of the video
-		char c = (char)waitKey(1000/fps);
-		
-		// End the program at user will
-		if( c  == 27 || c == 'q' || c == 'Q' )
+		// Program control
+		char c = waitKey(1000/fps);
+		option.pauseProgram(c);
+		option.screenshot(c, frame);
+		if(option.quitProgram(c))
 			break;
-		
-		// Saves screenshot when pressing "p"
-		else if (c == 'p' || c == 'P')
-		{
-			ss<<"screenshot"<<++o<<".png";
-			filename = ss.str();
-			ss.str("");
-			imwrite(filename, frame);
-		}
 	}
 	
+	// Add the framecount to be able to loop in other programs
 	markers_centers << "frameCount" << frameCount;
 	markers_corners << "frameCount" << frameCount;
 	

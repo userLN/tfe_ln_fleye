@@ -9,25 +9,31 @@
 #include "opencv2/features2d/features2d.hpp"
 #include "opencv2/nonfree/nonfree.hpp"
 
+// Others
+#include "OutputControl.h"
+
 // Namespaces
 using namespace cv;
 using namespace std;
 
-const char ESC_KEY = 27;
-string dataline;
+// Global parametres
+int const BEST_POINTS = 200;
 
-void opticalflowArrows (Mat frame, vector<uchar> status, vector<Point2f>  keypoints1, vector<Point2f> keypoints2)
+///////////////////////////////////////
+// Create red arrows on the frames	// 
+/////////////////////////////////////
+
+void opticalflowArrows (Mat image, vector<uchar> status, vector<Point2f>  keypoints1, vector<Point2f> keypoints2, int scale = 7, CvScalar color=CV_RGB(255,0,0));
+void opticalflowArrows (Mat image, vector<uchar> status, vector<Point2f>  keypoints1, vector<Point2f> keypoints2, int scale, CvScalar color)
 {
 	// Source : Stavens_opencv_optical_flow
-	int scale = 7;
-	CvScalar color = CV_RGB(255,0,0);
 		for(int i = 0; i < status.size(); i++)
 		{
 			// Skip if no correspoendance found
 			if ( status.at(i) == 0 ) 
 				continue;
 			
-			// Points that will be used to draw the lines
+			// Points and their properties that will be used to draw the lines
 			Point2f p,q; 
 			p.x = (int) keypoints1.at(i).x;
 			p.y = (int) keypoints1.at(i).y;
@@ -37,14 +43,77 @@ void opticalflowArrows (Mat frame, vector<uchar> status, vector<Point2f>  keypoi
 			double angle = atan2( (double) p.y - q.y, (double) p.x - q.x );
 			double hypotenuse = sqrt( pow((p.y - q.y),2) + pow((p.x - q.x),2) );
 			
-			// Stretch the arrows to actually see them
+			// Scale the arrows to actually see them
 			q.x = (int) (p.x - scale * hypotenuse * cos(angle));
 			q.y = (int) (p.y - scale * hypotenuse * sin(angle));
 			
-			// Draw on frame1
-			arrowedLine( frame, q, p, color, 2, 8, 0, 0.35);
+			// Draw on the image
+			arrowedLine(image, q, p, color, 2, 8, 0, 0.35);
 		}
 }
+
+///////////////////////////////////////////////////////////////////////////
+// Choose between multiple detectors and set parametres in consequence	//
+/////////////////////////////////////////////////////////////////////////
+
+void initFeatureDetector(Ptr<FeatureDetector> &detector , string detectorName)
+{
+	if (detectorName == "FAST")
+		detector= new FastFeatureDetector(50);
+	
+	else if (detectorName == "HARRIS")
+	{
+		detector = new GoodFeaturesToTrackDetector(200);
+		detector->set("useHarrisDetector",true);
+		detector->set("minDistance",10.);	
+	}
+	else if (detectorName == "MSER")
+	{
+		detector = new MserFeatureDetector();
+		detector->set("minDiversity",0.7);
+		detector->set("maxVariation",0.2);
+	}
+	else if (detectorName == "STAR");
+	else if (detectorName == "SIFT");
+	else if (detectorName == "SURF");
+	else if (detectorName == "ORB");	
+	else if (detectorName == "BRISK");
+	else if (detectorName == "BLOB");
+}
+
+///////////////////////////////////////////////////////
+// Update of the mask of the markers at each frame	//
+/////////////////////////////////////////////////////
+
+void maskUpdate(Mat cornersMatrix, Mat &mask )
+{
+	for(int i=0; i<10; ++i)
+	if(!(cornersMatrix.at<float>(0,i)<0 || cornersMatrix.at<float>(1,i)<0))
+	{
+		
+		vector < vector<Point> > contour;
+		contour.push_back(vector<Point>());
+		for(int j=0; j<4 ; j++)
+			{
+				contour[0].push_back(Point (cornersMatrix.at<float>((2*j),i),cornersMatrix.at<float>((2*j)+1,i)));
+			}
+		int thickness = max(abs(contour[0].at(0).x -contour[0].at(1).x),abs(contour[0].at(0).y - contour[0].at(2).y))+10;
+		drawContours(mask,contour,-1,Scalar::all(0),thickness);	
+	}
+}
+
+///////////////////////////////////////////////
+// Used to draw the center of the markers	//
+/////////////////////////////////////////////
+
+void drawDots(Mat centersMatrix, Mat &image, Scalar color = Scalar(0,200,0) , int thickness = 15);
+void drawDots(Mat centersMatrix, Mat &image, Scalar color, int thickness)
+{
+	for(int i=0; i<10; ++i)
+		if(!(centersMatrix.at<float>(0,i)<0 || centersMatrix.at<float>(1,i)<0))
+			circle(image,Point(centersMatrix.at<float>(0,i),centersMatrix.at<float>(1,i)),8,color,thickness);
+}
+
 
 int main(int argc, char **argv) 
 {
@@ -57,9 +126,14 @@ int main(int argc, char **argv)
 		return -1;
     }
     
+	double fps = capture.get(CV_CAP_PROP_FPS);
+	if (fps!=fps)
+		fps=60;
+    
+	
     // Open the datafiles
-	FileStorage markersCenter("markers_centers.yml", FileStorage::READ);
-	FileStorage markersCorners("markers_corners.yml", FileStorage::READ);
+	FileStorage markersCenter("filtered_markers_centers.yml", FileStorage::READ);
+	FileStorage markersCorners("filtered_markers_corners.yml", FileStorage::READ);
 	if(! markersCenter.isOpened() || ! markersCorners.isOpened())
 	{
 		cerr <<"Error opening data files !" <<endl;
@@ -67,72 +141,33 @@ int main(int argc, char **argv)
 	}
 	
 	//Feature detector initialization
-	Ptr<FeatureDetector> detector = new FastFeatureDetector(50);
-	
-// 	Ptr<FeatureDetector> detector = new GoodFeaturesToTrackDetector(200);
-// 	detector->set("useHarrisDetector",true);
-// 	detector->set("minDistance",10.);
-	
-// 	Ptr<FeatureDetector> detector = new MserFeatureDetector();
-// 	detector->set("minDiversity",0.7);
-// 	detector->set("maxVariation",0.2);
-	
-    // Mask creation
-	Mat mask(capture.get(CV_CAP_PROP_FRAME_HEIGHT),capture.get(CV_CAP_PROP_FRAME_WIDTH), CV_8UC1,Scalar::all(225));
-	//mask(ROI).setTo(Scalar::all(0));
-	
-	
+	Ptr<FeatureDetector> detector;
+	initFeatureDetector(detector , "FAST");
+
 	// Variables initialization
-	double fps = capture.get(CV_CAP_PROP_FPS);
-	if (fps!=fps)
-	{
-		fps=30;	waitKey(0);
-	}
 	vector<KeyPoint> keypoints;
 	vector<Point2f> kpt1,kpt2,kpt_tmp;
 	vector<uchar> status;
 	vector<float> err;
 	Mat frame1, frame2;
-	Mat frame_keypoints_out, frame_flow_out;
-	Point2f centers[10], corners[10][4];
-	
-	// Parameters
-	int bestPoints = 200;
-	
-	// Variables initialization for the screenshot option
-	string filename;
-	stringstream ss;
-	int o=0;	
+	OutputControl option;
 	
 	Mat centersMatrix, cornersMatrix;
 	markersCenter ["frame1"] >> centersMatrix;
 	markersCorners ["frame1"] >> cornersMatrix;
-	for(int i=0; i<10; ++i)
-		if(!(cornersMatrix.at<float>(0,i)<0 || cornersMatrix.at<float>(1,i)<0))
-		{
-			
-			vector < vector<Point> > contour;
-			contour.push_back(vector<Point>());
-			for(int j=0; j<4 ; j++)
-				{
-					contour[0].push_back(Point (cornersMatrix.at<float>((2*j),i),cornersMatrix.at<float>((2*j)+1,i)));
-				}
-			cout << cornersMatrix;	
-			cout << contour[0] << endl;
-			int thickness = max(abs(contour[0].at(0).x -contour[0].at(1).x),abs(contour[0].at(0).y - contour[0].at(2).y))+10;
-			drawContours(mask,contour,-1,Scalar::all(0),thickness);
-			
-		}
 	
+	// Mask creation
+	Mat mask(capture.get(CV_CAP_PROP_FRAME_HEIGHT),capture.get(CV_CAP_PROP_FRAME_WIDTH), CV_8UC1,Scalar::all(225));
+	maskUpdate(cornersMatrix,mask);
 			
 	// Do the first frame out of the main loop
 	capture >> frame1;
 	detector->detect(frame1, keypoints, mask);
-	KeyPointsFilter::retainBest(keypoints,bestPoints);
+	KeyPointsFilter::retainBest(keypoints,BEST_POINTS);
 	KeyPoint::convert(keypoints, kpt1);
 	
 	stringstream frameNumber;
-	int frameCount = (int)  markersCenter["frameCount"];
+	int frameCount = (int)  markersCorners["frameCount"];
 	
 	for(int frame = 2; frame <= frameCount; frame++ )
 	{
@@ -143,57 +178,38 @@ int main(int argc, char **argv)
 		if (frame2.empty() )
 			break;
 		
-		// Mask creation
-		mask= Mat(capture.get(CV_CAP_PROP_FRAME_HEIGHT),capture.get(CV_CAP_PROP_FRAME_WIDTH), CV_8UC1,Scalar::all(225));
-		
 		// Retrive information about the center and the corners of the markers
-			
 		frameNumber << "frame" << frame;
 		markersCenter [frameNumber.str()] >> centersMatrix;
 		markersCorners [frameNumber.str()] >> cornersMatrix;
 		frameNumber.str("");
 		
+		// Mask update
+		mask= Mat(capture.get(CV_CAP_PROP_FRAME_HEIGHT),capture.get(CV_CAP_PROP_FRAME_WIDTH), CV_8UC1,Scalar::all(225));
+		maskUpdate(cornersMatrix,mask);
 		
-		// Create the mask to avoid taking features in the markers
-		for(int i=0; i<10; ++i)
-			if(!(cornersMatrix.at<float>(0,i)<0 || cornersMatrix.at<float>(1,i)<0))
-			{
-				
-				vector < vector<Point> > contour;
-				contour.push_back(vector<Point>());
-				for(int j=0; j<4 ; j++)
-					{
-						contour[0].push_back(Point (cornersMatrix.at<float>((2*j),i),cornersMatrix.at<float>((2*j)+1,i)));
-					}
-				int thickness = max(abs(contour[0].at(0).x -contour[0].at(1).x),abs(contour[0].at(0).y - contour[0].at(2).y))+10;
-				drawContours(mask,contour,-1,Scalar::all(0),thickness);
-				//drawContours(frame2,contour,-1,Scalar(0,200,0),thickness);
-				
-			}
 		
 		// Detecting keypoints
 		detector->detect(frame2, keypoints,mask);
-		KeyPointsFilter::retainBest(keypoints,bestPoints);
+		KeyPointsFilter::retainBest(keypoints,BEST_POINTS);
 		KeyPoint::convert(keypoints, kpt2);
 		kpt_tmp = kpt2;
-		
 		
 		// Compute opticalflow
 		calcOpticalFlowPyrLK(frame1,frame2,kpt1,kpt2,status,err);
 		cout << (float) count(status.begin(),status.end(),1)/status.size() <<endl;
 		
-		// Showing arrow flow
-		frame2.copyTo(frame_flow_out);
-		opticalflowArrows (frame_flow_out, status, kpt1, kpt2);
+		frame2.copyTo(frame1);
 		
 		
-		// Show video with opticalflow
+		// Fancy output view
+		// Draw the center of the mask and the arrows of the flow vthen show the video
+		drawDots(centersMatrix, frame2);
+		opticalflowArrows (frame2, status, kpt1, kpt2);
 		namedWindow("opticalflow Image",0);
 		resizeWindow("opticalflow Image", 600,380);
-		imshow("opticalflow Image", frame_flow_out);
+		imshow("opticalflow Image", frame2);
 		
-		
-		frame2.copyTo(frame1);
 		
 		// If the percentage of correspondance drops under 85% refresh the features tracked
 		if((float) count(status.begin(),status.end(),1)/status.size() < (float) 0.86)
@@ -204,19 +220,17 @@ int main(int argc, char **argv)
 		else
 			kpt1 = kpt2;
 		
-		// End the program at user will
-		char c = (char)waitKey(1);
-		if( c  == ESC_KEY || c == 'q' || c == 'Q' )
+		// Program control
+		char c = waitKey(1000/fps);
+		option.pauseProgram(c);
+		option.screenshot(c, frame2);
+		if(option.quitProgram(c))
 			break;
-		if( c == 'p' || c == 'P' )
-		{
-			ss<<"screenshot"<<++o<<".png";
-			filename = ss.str();
-			ss.str("");
-			imwrite(filename, frame_flow_out);
-		}
+		
 	}
+	// close the data files
 	markersCenter.release();
 	markersCorners.release();
+	
     return 0;
 }

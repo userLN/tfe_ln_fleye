@@ -5,7 +5,7 @@ SET(CMAKE_MODULE_PATH ${CMAKE_INSTALL_PREFIX}/lib/cmake/)
 find_package(OpenCV REQUIRED)
 find_package(aruco REQUIRED)
 
-add_executable("markerDetectors" markersDetector.cpp)
+add_executable("markerDetectors" markersDetector.cpp OutputControl.cpp)
 
 target_link_libraries("markerDetectors" ${OpenCV_LIBS})
 target_link_libraries("markerDetectors" ${aruco_LIBS})
