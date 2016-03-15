@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 2.8)
+project("MarkersFilter")
+find_package(OpenCV REQUIRED)
+add_executable("MarkersFilter" MarkersFilter.cpp)
+target_link_libraries("MarkersFilter" ${OpenCV_LIBS})
