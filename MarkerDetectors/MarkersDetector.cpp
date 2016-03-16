@@ -1,3 +1,20 @@
+/*
+ * Author:	Hélène Loozen 
+ * Date:	2016
+ * 
+ * << MarkersDetector >> finds the ArUco markers in each frame of a video and write their position in a YAML file
+ * 
+ * This program works alongside two others : << CameraMotion.cpp >> and << MarkerDataFilter.cpp >>
+ * 
+ * How to use :
+ * 1. Choose a video containing ArUco markers
+ * 2. Use << MarkersDetector >> on the chosen video
+ * 3. Use << MarkerDataFilter >> on the output YAML files of << MarkersDetector >> 
+ * 4. Use << CameraMotion >> with the output YAML files of << MarkerDataFilter >>
+ * 
+ */
+
+
 // Standard libraries
 #include <iostream>
 #include <algorithm>
@@ -20,11 +37,13 @@ using namespace std;
 using namespace aruco;
 
 // Global Variables
+float const DEFAULT_FPS = 60;
 float const THRESHOLD_X = 6.;
 float const THRESHOLD_Y = 6.;
 
-///////////////////////////////////////////////////////////////
-// Function that sorts the markers according to their id	//
+
+//////////////////////////////////////////////////////////////
+// Function that sorts the markers according to their id
 /////////////////////////////////////////////////////////////
 
 bool sort_markers(const Marker &a, const Marker &b) 
@@ -33,8 +52,8 @@ bool sort_markers(const Marker &a, const Marker &b)
 }
 
 
-///////////////////////
-// Main function	//
+//////////////////////
+// Main function	
 /////////////////////
 
 int main(int argc, char **argv) 
@@ -49,7 +68,7 @@ int main(int argc, char **argv)
 	}
 	double fps = capture.get(CV_CAP_PROP_FPS);
 	if (fps!=fps)
-		fps=60;
+		fps=DEFAULT_FPS;
 
 	int frameCount = 0;
 	stringstream frameNumber;
@@ -87,7 +106,7 @@ int main(int argc, char **argv)
 		
 		// Put the centers in a matrix
 		int k =0;
-		for(int j=0; j<10; ++j)
+		for(int j=0; j<centersMatrix.cols; ++j)
 			if(k<Markers.size() && Markers[k].id==(j+1)*10)
 			{
 				centersMatrix.at<float>(0,j)=Markers[k].getCenter().x;
@@ -96,10 +115,10 @@ int main(int argc, char **argv)
 			}
 			
 		// Put the corners in a matrix	
-		for(int i=0;i<4;i++)
+		for(int i=0;i<cornersMatrix.rows/2;i++)
 		{
 			int k=0;
-			for(int j=0; j<10; ++j)
+			for(int j=0; j<cornersMatrix.cols; ++j)
 			if(k<Markers.size() && Markers[k].id==(j+1)*10)
 			{
 				cornersMatrix.at<float>(0+(2*i),j)=Markers[k].at(i).x;
@@ -127,7 +146,6 @@ int main(int argc, char **argv)
 		namedWindow("Marked Image",0);
 		resizeWindow("Marked Image", 600,380);
 		imshow("Marked Image",frame);
-		
 		
 		// Program control
 		char c = waitKey(1000/fps);
