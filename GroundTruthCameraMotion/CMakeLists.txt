@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 2.8)
+project("Camera_motion_gt")
+find_package(OpenCV REQUIRED)
+add_executable("Camera_motion_gt" CameraMotionGT.cpp OutputControl.cpp TicToc.cpp)
+target_link_libraries("Camera_motion_gt" ${OpenCV_LIBS})

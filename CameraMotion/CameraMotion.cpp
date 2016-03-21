@@ -24,6 +24,7 @@
 // Standard libraries
 #include <iostream>
 #include <fstream>
+#include <math.h>
 
 // OpenCV libraries
 #include <opencv2/opencv.hpp>
@@ -42,10 +43,13 @@ using namespace std;
 
 // Global parametres
 float const DEFAULT_FPS = 60;
+int const CORNER_BACK = 55;
+int const CORNER_FORE = 110;
 string const DETECTOR_NAME = "FAST";
 int const BEST_POINTS = 200;
 float const PERCENT = 0.86;
 bool const REFRESH_MODE_ALL = 1;
+bool const HAS_CORNERS = 0;
 
 
 //////////////////////////////////////
@@ -174,6 +178,25 @@ void maskUpdate(Mat cornersMatrix, Mat &mask )
 }
 
 
+void maskUpdate(Mat centersMatrix, Mat &mask, int mask_size )
+{
+	int x[4] = {-1, +1, +1, -1};
+	int y[4] = {+1, +1, -1, -1};
+	for(int i=0; i<centersMatrix.cols; ++i)
+		if(!(centersMatrix.at<float>(0,i)<0 || centersMatrix.at<float>(1,i)<0))
+		{
+			vector < vector<Point> > contour;
+			contour.push_back(vector<Point>());
+			
+			for(int j=0; j< 4 ; j++)
+					contour[0].push_back(Point (centersMatrix.at<float>(0,i)+(mask_size*x[j]),centersMatrix.at<float>(1,i)+(mask_size*y[j])));
+				
+			int thickness = max(abs(contour[0].at(0).x -contour[0].at(1).x),abs(contour[0].at(0).y - contour[0].at(2).y))+25;
+			drawContours(mask,contour,-1,Scalar::all(0),thickness);	
+		}
+}
+
+
 //////////////////////////////////////////////
 // Used to draw the center of the markers
 /////////////////////////////////////////////
@@ -201,6 +224,37 @@ vector<Point2f> cleanFeatures(vector<Point2f> kpt, vector<uchar> status)
 	return kptclean;
 }
 
+////////////////////////////////////////
+// Compute the translation matrix only	
+////////////////////////////////////////
+Mat findTranslation(vector<Point2f>  keypoints1, vector<Point2f> keypoints2)
+{
+	Mat translationMatrix = (Mat_<float> (1,2) ) ;
+	float x = 0;
+	float y = 0;
+	for(int i = 0; i < keypoints1.size(); i++)
+	{
+		x+=keypoints2.at(i).x-keypoints1.at(i).x;
+		y+=keypoints2.at(i).y-keypoints1.at(i).y;
+	}
+	translationMatrix.at<float>(0) = x/keypoints1.size();
+	translationMatrix.at<float>(1) = y/keypoints1.size();
+	
+	return translationMatrix;
+}
+
+
+////////////////////////////
+// Compute the RMS error	
+////////////////////////////
+float rmsError(Mat coordinate1 , Mat coordinate2)
+{
+	float x_square = pow(coordinate2.at<float>(0) - coordinate1.at<float>(0),2);
+	float y_square = pow(coordinate2.at<float>(1) - coordinate1.at<float>(1),2);
+	return sqrt(x_square+y_square);
+}
+
+
 
 ////////////////////
 // Main function
@@ -208,7 +262,7 @@ vector<Point2f> cleanFeatures(vector<Point2f> kpt, vector<uchar> status)
 int main(int argc, char **argv) 
 {
 	// Open the video file
-	VideoCapture capture("marker_video_1.mp4");
+	VideoCapture capture("marker_video_2.mp4");
 	
 	if (!capture.isOpened())
 	{
@@ -222,12 +276,28 @@ int main(int argc, char **argv)
     
 	
     // Open the datafiles
-	FileStorage markersCenter("filtered_markers_centers.yml", FileStorage::READ);
-	FileStorage markersCorners("filtered_markers_corners.yml", FileStorage::READ);
-	if(! markersCenter.isOpened() || ! markersCorners.isOpened())
+	FileStorage markersCenter("_markers_centers.yml", FileStorage::READ);
+	FileStorage markersCorners,backgroundGT,foregroundGT;
+	if (HAS_CORNERS)
 	{
-		cerr <<"Error opening data files !" <<endl;
-		return -1;
+		markersCorners.open("filtered_markers_corners.yml", FileStorage::READ);
+		if(! markersCenter.isOpened() ||! markersCorners.isOpened())
+		{
+			cerr <<"Error opening data files !" <<endl;
+			return -1;
+		}
+	}
+	
+	else
+	{
+		backgroundGT.open("camera_translation_data.yml", FileStorage::READ);
+		foregroundGT.open("foreground_translation_data.yml", FileStorage::READ);
+		
+		if(! markersCenter.isOpened() || ! backgroundGT.isOpened() || ! foregroundGT.isOpened())
+		{
+			cerr <<"Error opening data files !" <<endl;
+			return -1;
+		}
 	}
 	
 	//Feature detector initialization
@@ -250,8 +320,11 @@ int main(int argc, char **argv)
 	
 	// Mask creation
 	Mat mask(capture.get(CV_CAP_PROP_FRAME_HEIGHT),capture.get(CV_CAP_PROP_FRAME_WIDTH), CV_8UC1,Scalar::all(225));
-	maskUpdate(cornersMatrix,mask);
-			
+	if(HAS_CORNERS)
+		maskUpdate(cornersMatrix,mask);
+	else
+		maskUpdate(centersMatrix,mask, CORNER_BACK);
+	
 	// Do the first frame out of the main loop
 	capture >> frame1;
 	detector->detect(frame1, keypoints, mask);
@@ -259,11 +332,11 @@ int main(int argc, char **argv)
 	KeyPoint::convert(keypoints, kpt1);
 	
 	stringstream frameNumber;
-	int frameCount = (int)  markersCorners["frameCount"];
+	int frameCount = (int)  markersCenter["frameCount"];
 
 	for(int frame = 2; frame <= frameCount; frame++ )
 	{
-		time.tic();
+	//	time.tic();
 		// Acquire new frame
 		capture >> frame2;
 		
@@ -272,14 +345,18 @@ int main(int argc, char **argv)
 			break;
 		
 		// Retrive information about the center and the corners of the markers
+		frameNumber.str("");
 		frameNumber << "frame" << frame;
 		markersCenter [frameNumber.str()] >> centersMatrix;
 		markersCorners [frameNumber.str()] >> cornersMatrix;
-		frameNumber.str("");
+		
 		
 		// Mask update
 		mask = Mat(capture.get(CV_CAP_PROP_FRAME_HEIGHT),capture.get(CV_CAP_PROP_FRAME_WIDTH), CV_8UC1,Scalar::all(225));
-		maskUpdate(cornersMatrix,mask);
+		if(HAS_CORNERS)
+			maskUpdate(cornersMatrix,mask);
+		else
+			maskUpdate(centersMatrix,mask, CORNER_BACK);
 		
 		// Detecting keypoints
 		detector->detect(frame2, keypoints,mask);
@@ -297,7 +374,12 @@ int main(int argc, char **argv)
 		//Find Homography
 		foundHomography = findHomography(kpt1,kpt2,CV_RANSAC,3,hStatus);
 // 		cout << foundHomography << endl;
-	
+		
+		Mat backGT;
+		backgroundGT[frameNumber.str()] >> backGT;
+		
+		float absError = rmsError(backGT,  (Mat_<float> (1,2) << foundHomography.at<double>(0,2), foundHomography.at<double>(1,2)));
+		cout << absError <<endl;
 // 		//Create the perspective image
 // 		warpPerspective(frame2,perspectiveIm,foundHomography,frame2.size(), CV_INTER_LINEAR | CV_WARP_INVERSE_MAP);
 // 		namedWindow("Perspective Image",0);
@@ -341,7 +423,7 @@ int main(int argc, char **argv)
 			break;
 		option.pauseProgram(c);
 		option.screenshot(c, frame2);
-		cout << (double) mask.rows*mask.cols/time.getToc() << " pixels/second" << endl;
+//		cout << (double) mask.rows*mask.cols/time.getToc() << " pixels/second" << endl;
 // 		time.toc();
 	}
 	
