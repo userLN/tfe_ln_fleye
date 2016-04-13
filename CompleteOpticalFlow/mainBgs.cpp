@@ -23,6 +23,7 @@
 #include "markersDetector.h"
 #include "trackingFilter.h"
 #include "opticalFlow.h"
+#include "Vibe.h"
 
 // Namespaces
 using namespace cv;
@@ -34,6 +35,24 @@ void help();
 
 // Global parametres
 float const DEFAULT_FPS = 60;
+
+
+
+void BgsPostprocess(const cv::Mat &src, cv::Mat &dst)
+{
+	// Implemented by Michael Fonder
+	
+	Mat tmp;
+
+	Mat struct_el = getStructuringElement(MORPH_ELLIPSE, Point(7, 23));
+
+	//Noise reduction step
+	medianBlur(src, tmp, 3);
+	medianBlur(tmp, tmp, 3);	
+
+	//Fill holes in foreground
+	morphologyEx(tmp, dst, MORPH_CLOSE, struct_el);
+}
 
 
 // Main funtion
@@ -62,32 +81,18 @@ int main(int argc, char **argv)
 	if (fps!=fps)
 		fps=DEFAULT_FPS;
 	
-	
-	// Load markers
-	markersDetector markers;
-	FileStorage centers("_markers_centers.yml", FileStorage::READ);
-	markers.readMarkersFiles(centers);
+	::BackgroundSubtractor *bgsVibe = new Vibe;
 	
 	// Variables initialization
-	Mat frame, frameGray,framePrev;
+	Mat frame,frameGray, framePrev;
 	ticToc time;
 	
 	outputControl control;
-	control.outputControlHelp(1,0,0);
+	control.outputControlHelp(1,0,1);
 	
-	opticalFlow opticalFlow("FAST", 200, 0.86, true);
-	opticalFlow.detector->set("threshold", 30);
-	//opticalFlow.detector->set(3, FastFeatureDetector::TYPE_9_16);
-	
-	// Mask creation and update
-	Mat mask(height,width, CV_8UC1,Scalar::all(225));
-	opticalFlow.markersMaskUpdate(markers.getCentersMatrix(), mask, 50);
 	
 	// Detect the feature for the fisrt frame
-	capture >>frame;
-	cvtColor(frame, frameGray, CV_BGR2GRAY);
-	opticalFlow.FeatureDetection(frameGray, mask);
-	frameGray.copyTo(framePrev);
+	capture >>framePrev;
 	
 	while(true)
 	{
@@ -95,47 +100,42 @@ int main(int argc, char **argv)
 		// Acquire new frame
 		capture >> frame;
 		cvtColor(frame, frameGray, CV_BGR2GRAY);
-		markers.newFrame();
-		markers.readMarkersFiles(centers);
+		
 		
 		// End when video finishes
 		if (frame.empty())
 			break;
 		
-		Mat mask(height,width, CV_8UC1,Scalar::all(225));
-		opticalFlow.markersMaskUpdate(markers.getCentersMatrix(), mask, 50);
-		opticalFlow.FeatureDetection(frameGray, mask);
-		Mat foundHomography, deltaX, deltaY;
+		
+		Mat bgsMask = bgsVibe->process(frameGray);
+		//BgsPostprocess(bgsMask,bgsMask);
+		
+		frame.copyTo(framePrev);
 		
 		
-		opticalFlow.findProjectiveMatrix(framePrev, frameGray,foundHomography);
-		opticalFlow.pixelDisplacment(foundHomography, deltaX, deltaY, width, height );
-		
-	
-		
-		frameGray.copyTo(framePrev);
-		
-		opticalFlow.drawDots(markers.getCentersMatrix(),frameGray);
-		opticalFlow.drawOpticalflowArrows(frameGray);
-		
-		
-		opticalFlow.keyPointsUpdate(frameGray, mask);
 		
 		// Control of the output
 		char c = waitKey(1000/fps);
-		control.showVideo("Output", frameGray, (int) height/3, (int) width/3 );
+		if (! bgsMask.empty())
+		{
+			control.showVideo("Bgs mask", bgsMask, (int) height/3, (int) width/3 );
+		}
+		
+
+		control.showVideo("Output", frame, (int) height/3, (int) width/3 );
 		if(control.quitProgram(c))
 			break;
 		
-		cout << (double) mask.rows*mask.cols/time.toc() << " pixels/second" << endl;
+		control.screenshot(c, frame);
+		control.screenshot(c, bgsMask);
+		
+		cout << (double) width*height/time.toc() << " pixels/second" << endl;
 		
 		
 	}
-	
-    centers.release();
+	delete bgsVibe;
     return 0;
 }
-
 
 
 

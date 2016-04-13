@@ -19,10 +19,7 @@
 
 // Others
 #include "outputControl.h"
-#include "ticToc.h"
 #include "markersDetector.h"
-#include "trackingFilter.h"
-#include "opticalFlow.h"
 
 // Namespaces
 using namespace cv;
@@ -62,77 +59,42 @@ int main(int argc, char **argv)
 	if (fps!=fps)
 		fps=DEFAULT_FPS;
 	
-	
-	// Load markers
-	markersDetector markers;
-	FileStorage centers("_markers_centers.yml", FileStorage::READ);
-	markers.readMarkersFiles(centers);
-	
 	// Variables initialization
-	Mat frame, frameGray,framePrev;
-	ticToc time;
-	
+	Mat frame;
 	outputControl control;
-	control.outputControlHelp(1,0,0);
+	control.outputControlHelp(1,1,1);
 	
-	opticalFlow opticalFlow("FAST", 200, 0.86, true);
-	opticalFlow.detector->set("threshold", 30);
-	//opticalFlow.detector->set(3, FastFeatureDetector::TYPE_9_16);
+	markersDetector foundMarkers;
 	
-	// Mask creation and update
-	Mat mask(height,width, CV_8UC1,Scalar::all(225));
-	opticalFlow.markersMaskUpdate(markers.getCentersMatrix(), mask, 50);
-	
-	// Detect the feature for the fisrt frame
-	capture >>frame;
-	cvtColor(frame, frameGray, CV_BGR2GRAY);
-	opticalFlow.FeatureDetection(frameGray, mask);
-	frameGray.copyTo(framePrev);
+	foundMarkers.createMarkersFiles();
 	
 	while(true)
 	{
-		time.tic();
 		// Acquire new frame
 		capture >> frame;
-		cvtColor(frame, frameGray, CV_BGR2GRAY);
-		markers.newFrame();
-		markers.readMarkersFiles(centers);
 		
 		// End when video finishes
 		if (frame.empty())
 			break;
 		
-		Mat mask(height,width, CV_8UC1,Scalar::all(225));
-		opticalFlow.markersMaskUpdate(markers.getCentersMatrix(), mask, 50);
-		opticalFlow.FeatureDetection(frameGray, mask);
-		Mat foundHomography, deltaX, deltaY;
+		foundMarkers.findMarkers(frame);
 		
 		
-		opticalFlow.findProjectiveMatrix(framePrev, frameGray,foundHomography);
-		opticalFlow.pixelDisplacment(foundHomography, deltaX, deltaY, width, height );
-		
-	
-		
-		frameGray.copyTo(framePrev);
-		
-		opticalFlow.drawDots(markers.getCentersMatrix(),frameGray);
-		opticalFlow.drawOpticalflowArrows(frameGray);
-		
-		
-		opticalFlow.keyPointsUpdate(frameGray, mask);
+		foundMarkers.writeMarkersFiles();
+		foundMarkers.drawMarkers(frame);
+		foundMarkers.newFrame();
 		
 		// Control of the output
 		char c = waitKey(1000/fps);
-		control.showVideo("Output", frameGray, (int) height/3, (int) width/3 );
+		control.showVideo("Output", frame, (int) height/3, (int) width/3 );
 		if(control.quitProgram(c))
 			break;
-		
-		cout << (double) mask.rows*mask.cols/time.toc() << " pixels/second" << endl;
-		
-		
+		control.pauseProgram(c);
+		control.screenshot(c, frame);
 	}
 	
-    centers.release();
+	foundMarkers.closeMarkersFiles();
+    
     return 0;
 }
 
