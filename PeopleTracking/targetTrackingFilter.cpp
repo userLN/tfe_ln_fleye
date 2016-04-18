@@ -20,6 +20,7 @@
 int MAX_MISSING_DATA;
 int THRESHOLD;
 int BORDERS;
+float CORR_FACTOR;
 
 // Initialization of the Kalman filter	
 void initKalman(cv::KalmanFilter *KF, float x , float y, float dt = 1,float dv = -1)
@@ -121,9 +122,13 @@ cv::Mat KalmanModelUpdate (cv::KalmanFilter *KF, float x , float y, int &missing
 
 targetTrackingFilter::targetTrackingFilter(float velocityFactor,float accelerationFactor, int maxMissingData)
 {
-	MAX_MISSING_DATA = 23;
-	THRESHOLD = 20;
+	MAX_MISSING_DATA = 18;
+	// MAX_MISSING_DATA down if fps down
+	THRESHOLD = 25;
 	BORDERS = 10;
+	CORR_FACTOR = 0,97;
+	// CORR_FACTOR down if fps down
+	nbOfTargets =0;
 	dt = velocityFactor;
 	dv = accelerationFactor;
 }
@@ -151,10 +156,10 @@ void targetTrackingFilter::applyFilter(cv::Mat &image, std::vector<cv::Rect> tar
 	
 	
 	
-	
 	for(int i = 0 ; i<targets.size() ; ++i)
 	{
 		bool found = false;
+		bool close = false;
 		for(int j=0 ; j<predictions.size(); ++j)
 		{
 			// Check if the observation is in the square THRESHOLD of the track
@@ -162,29 +167,43 @@ void targetTrackingFilter::applyFilter(cv::Mat &image, std::vector<cv::Rect> tar
 			float deltaY = center(targets.at(i)).y-predictions.at(j).at<float>(1);
 			if (abs(deltaX) < THRESHOLD && abs(deltaY) < THRESHOLD)
 			{
-				// without correlation
-				predictions.at(j)= KFs.at(j).correct((cv::Mat_<float>(2,1)<< center(targets.at(i)).x ,center(targets.at(i)).y ));
-				missingData.at(j) = 0;
-				found = true;
-				break;
-				// correlation
-				// if (targetsModel.at(j) % frameColor at rectangle i > threshold )
-				//{
-					// Update
-					// targetsModel.at(j) = frameColor at rectangle i;
-					// break;
-				//}
+				//correlation
+				close = true;
+				cv::Mat correlation;
+				double minVal, maxVal;
+				cv::Point minLoc, maxLoc;
+				cv::Mat  toCompare = cv::Mat(image,targets.at(i));
+				cv::resize(toCompare,toCompare,targetsModel.at(j).size());
+				cv::matchTemplate(toCompare, targetsModel.at(j), correlation, CV_TM_CCORR_NORMED);
+				cv::minMaxLoc(correlation, &minVal,&maxVal,&minLoc,&maxLoc);
+				std::cout << maxVal << std::endl;
+				
+// 				cv::Mat hist1,hist2;
+// 				cv::calcHist(&cv::Mat(image,targets.at(i)));
+// 				cv::calcHist(&targetsModel.at(j),1,0,cv::Mat(),hist1);
+// 				cv::compareHist();
+				
+				if(maxVal>CORR_FACTOR)
+				{
+					predictions.at(j) = KFs.at(j).correct((cv::Mat_<float>(2,1)<< center(targets.at(i)).x ,center(targets.at(i)).y ));
+					missingData.at(j) = 0;
+					targetsModel.at(j) = cv::Mat(image,targets.at(i));
+					found = true;
+					break;
+				}
 			}
 				
 		}
 		
 		// If no tak is found for the target a new tracking filter is created 
-		if(! found) //&& (targets.at(i).x < BORDERS || targets.at(i).x > image.rows - BORDERS || targets.at(i).y < BORDERS || targets.at(i).y > image.cols - BORDERS))
+		if(! found && ! close ) // &&(targets.at(i).x < BORDERS || targets.at(i).x > image.rows - BORDERS || targets.at(i).y < BORDERS || targets.at(i).y > image.cols - BORDERS))
 		{
 			cv::KalmanFilter newKalman;
 			initKalman (&newKalman,  center(targets.at(i)).x, center(targets.at(i)).y, 1.5);
 			KFs.push_back(newKalman);
 			missingData.push_back(0);
+			targetsModel.push_back(cv::Mat(image,targets.at(i)));
+			noOfTarget.push_back(++nbOfTargets); 
 		}
 		
 		// If the track of the target is lost for more than MAX_MISSING_DATA frames the tracking filter is deleted
@@ -203,21 +222,32 @@ void targetTrackingFilter::applyFilter(cv::Mat &image, std::vector<cv::Rect> tar
 					KFs.erase(KFs.begin()+i);
 					missingData.erase(missingData.begin()+i);
 					predictions.erase(predictions.begin()+i);
+					targetsModel.erase(targetsModel.begin()+i);
+					noOfTarget.erase(noOfTarget.begin()+i);
 				}
 		
 			}
-			
 	}
 }
 
 
-void targetTrackingFilter::drawTargets(cv::Mat &image)
+void targetTrackingFilter::drawTargets(cv::Mat &image,cv::Scalar color, int thickness)
 {
 	for (int i =0; i<KFs.size();++i)
 	{
-		cv::Point target;
-		target.x=KFs.at(i).statePost.at<float>(0);
-		target.y=KFs.at(i).statePost.at<float>(1);
-		cv::circle(image, target, 3, CV_RGB(255,0,0), 2); 
+		std::stringstream s;
+		s<<noOfTarget.at(i);
+		cv::Point label;
+		label.x=KFs.at(i).statePost.at<float>(0);
+		label.y=KFs.at(i).statePost.at<float>(1);
+		
+		cv::Rect target;
+		target.width = targetsModel.at(i).cols;
+		target.height = targetsModel.at(i).rows;
+		target.x=KFs.at(i).statePost.at<float>(0)-target.width/2;
+		target.y=KFs.at(i).statePost.at<float>(1)-target.height/2;
+
+		cv::rectangle(image, target, color , thickness); 
+		cv::putText(image, s.str(), label,CV_FONT_NORMAL, 0.7, color,thickness );
 	}
 }

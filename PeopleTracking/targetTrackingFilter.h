@@ -16,6 +16,8 @@ private:
 	std::vector<cv::Mat> targetsModel;
 	std::vector<cv::Mat> predictions;
 	std::vector<cv::KalmanFilter> KFs;
+	std::vector<int> noOfTarget;
+	int nbOfTargets;
 	float dt;
 	float dv;
 
@@ -24,7 +26,7 @@ public:
 	~targetTrackingFilter();
 	
 	void applyFilter(cv::Mat &image,std::vector<cv::Rect> targets);
-	void drawTargets(cv::Mat &image);
+	void drawTargets(cv::Mat &image,cv::Scalar color = CV_RGB(255,0,0), int thickness = 1);
 };
 
 

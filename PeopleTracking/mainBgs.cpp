@@ -31,7 +31,7 @@ using namespace std;
 void help();
 
 // Global parametres
-float const DEFAULT_FPS = 60;
+float const DEFAULT_FPS = 120;
 
 void blobsFinder(Mat &image, vector<Rect> &blobs)
 {
@@ -111,6 +111,7 @@ int main(int argc, char **argv)
 	{
 		// Acquire new frame
 		capture >> frame;
+		
 		cvtColor(frame, frameGray, CV_BGR2GRAY);
 		
 		
